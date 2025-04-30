@@ -1,0 +1,18 @@
+scae:
+  learning_rate: 0.01
+  optimizer: "Adam"
+  criterion: "MSELoss"
+  num_epochs: 10
+  batch_size: 32
+  
+convolution_unsupervised:
+  learning_rate: 0.001
+  optimizer: "Adam"
+  criterion: "CrossEntropyLoss"
+  num_epochs: 30
+  batch_size: 32
+  dropout_rate: 0.8
+
+wandb:
+  project: "cv_project"
+  entity: "your_username"  # Replace with your wandb username

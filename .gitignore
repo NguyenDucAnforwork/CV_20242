@@ -1,0 +1,6 @@
+#code folder
+code/
+.vscode/
+.dist/
+papers/
+slides/
