@@ -178,12 +178,12 @@ def create_optimized_dataloaders(combined_dataset, batch_size=256, num_workers=2
     return train_loader, val_loader, test_loader
 
 class SCAE(nn.Module):
-    def __init__(self, normalization_type="batch_norm", use_dropout=False, dropout_prob=0.3, activation="leaky_relu"):
+    def __init__(self, normalization_type="batch_norm", use_dropout=False, dropout_prob=0.3, activation="relu"):
         super(SCAE, self).__init__()
         def norm_layer(num_features):
             if normalization_type == "batch_norm": return nn.BatchNorm2d(num_features)
             elif normalization_type == "group_norm": return nn.GroupNorm(num_groups=8, num_channels=num_features)
-            elif normalization_type == "layer_norm": return nn.LayerNorm([num_features, 26, 26])
+            elif normalization_type == "layer_norm": return nn.LayerNorm([num_features, 24, 24]) # This might need review depending on where it's used
             else: return nn.Identity()
         def activation_layer():
             return nn.LeakyReLU(inplace=True) if activation == "leaky_relu" else nn.ReLU(inplace=True)
@@ -191,7 +191,7 @@ class SCAE(nn.Module):
             return nn.Dropout2d(dropout_prob) if use_dropout else nn.Identity()
 
         self.encoder = nn.Sequential(
-            nn.Conv2d(1, 64, kernel_size=11, stride=1, padding=5), norm_layer(64), activation_layer(), dropout_layer(),
+            nn.Conv2d(1, 64, kernel_size=11, stride=2, padding=0), norm_layer(64), activation_layer(), dropout_layer(),
             nn.MaxPool2d(2, 2),
             nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1), norm_layer(128), activation_layer(), dropout_layer(),
             nn.MaxPool2d(2, 2)
