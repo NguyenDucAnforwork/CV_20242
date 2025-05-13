@@ -183,27 +183,55 @@ class SCAE(nn.Module):
         def norm_layer(num_features):
             if normalization_type == "batch_norm": return nn.BatchNorm2d(num_features)
             elif normalization_type == "group_norm": return nn.GroupNorm(num_groups=8, num_channels=num_features)
-            elif normalization_type == "layer_norm": return nn.LayerNorm([num_features, 24, 24]) # This might need review depending on where it's used
+            elif normalization_type == "layer_norm": return nn.LayerNorm([num_features, 48, 48])
             else: return nn.Identity()
         def activation_layer():
             return nn.LeakyReLU(inplace=True) if activation == "leaky_relu" else nn.ReLU(inplace=True)
         def dropout_layer():
             return nn.Dropout2d(dropout_prob) if use_dropout else nn.Identity()
 
-        self.encoder = nn.Sequential(
-            nn.Conv2d(1, 64, kernel_size=11, stride=2, padding=0), norm_layer(64), activation_layer(), dropout_layer(),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1), norm_layer(128), activation_layer(), dropout_layer(),
-            nn.MaxPool2d(2, 2)
-        )
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1), norm_layer(64), activation_layer(), dropout_layer(),
-            nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2, padding=0, output_padding=1), norm_layer(32), activation_layer(), dropout_layer(),
-            nn.Conv2d(32, 1, kernel_size=3, stride=1, padding=1), nn.Sigmoid()
-        )
+        # Encoder: conv1 → pool1 → conv2
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=11, stride=2, padding=0)  # 105x105 → 48x48
+        self.norm1 = norm_layer(64)
+        self.act1 = activation_layer()
+        self.drop1 = dropout_layer()
+        self.pool1 = nn.MaxPool2d(2, 2, return_indices=True)                # 48x48 → 24x24
+
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1) # 24x24 → 24x24
+        self.norm2 = norm_layer(128)
+        self.act2 = activation_layer()
+        self.drop2 = dropout_layer()
+
+        # Decoder: deconv1 → unpool1 → deconv2
+        self.deconv1 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=1, padding=1) # 24x24 → 24x24
+        self.norm3 = norm_layer(64)
+        self.act3 = activation_layer()
+        self.drop3 = dropout_layer()
+        self.unpool1 = nn.MaxUnpool2d(2, 2)                                           # 24x24 → 48x48
+
+        self.deconv2 = nn.ConvTranspose2d(64, 1, kernel_size=11, stride=2, padding=0) # 48x48 → 105x105
+        # No normalization/activation after last layer for output
+        self.final_act = nn.Sigmoid()
+
     def forward(self, x):
-        x = self.encoder(x)
-        x = self.decoder(x)
+        # Encoder
+        x = self.conv1(x)
+        x = self.norm1(x)
+        x = self.act1(x)
+        x = self.drop1(x)
+        x, indices = self.pool1(x)
+        x = self.conv2(x)
+        x = self.norm2(x)
+        x = self.act2(x)
+        x = self.drop2(x)
+        # Decoder
+        x = self.deconv1(x)
+        x = self.norm3(x)
+        x = self.act3(x)
+        x = self.drop3(x)
+        x = self.unpool1(x, indices, output_size=torch.Size([x.size(0), x.size(1), 48, 48]))
+        x = self.deconv2(x)
+        x = self.final_act(x)
         return x
 
 def validate_memory_efficient(model, val_loader, criterion, device):
@@ -292,39 +320,47 @@ if __name__ == '__main__':
     gc.collect()
     if torch.cuda.is_available(): torch.cuda.empty_cache()
 
+    # Test forward pass of SCAE
+    test_tensor = torch.randn(1, 1, 105, 105).cuda() if torch.cuda.is_available() else torch.randn(1, 1, 105, 105)
+    model = SCAE().cuda() if torch.cuda.is_available() else SCAE()
+    with torch.no_grad():
+        output = model(test_tensor)
+    print(f"Output shape: {output.shape}")
+    print(f"Output tensor: {output}")
+
     # Define paths - replace with your actual paths
-    jpeg_dir = "/kaggle/input/deepfont-unlab/scrape-wtf-new/scrape-wtf-new"  # Example path
-    bcf_file = "/kaggle/input/deepfont-unlab/syn_train/VFR_syn_train_extracted.bcf"  # Example path
-    label_file = "/kaggle/input/deepfont-unlab/syn_train/VFR_syn_train_extracted.label" # Example path
-    checkpoint_dir_path = "/kaggle/working/checkpoints" # Example path
+    # jpeg_dir = "/kaggle/input/deepfont-unlab/scrape-wtf-new/scrape-wtf-new"  # Example path
+    # bcf_file = "/kaggle/input/deepfont-unlab/syn_train/VFR_syn_train_extracted.bcf"  # Example path
+    # label_file = "/kaggle/input/deepfont-unlab/syn_train/VFR_syn_train_extracted.label" # Example path
+    # checkpoint_dir_path = "/kaggle/working/checkpoints" # Example path
 
-    if torch.cuda.is_available():
-        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+    # if torch.cuda.is_available():
+    #     print(f"Using GPU: {torch.cuda.get_device_name(0)}")
 
-    combined_dataset = CombinedImageDataset(
-        jpeg_dir=jpeg_dir,
-        bcf_file=bcf_file,
-        label_file=label_file,
-        num_patch=1,
-        patch_size=(105, 105)
-    )
+    # combined_dataset = CombinedImageDataset(
+    #     jpeg_dir=jpeg_dir,
+    #     bcf_file=bcf_file,
+    #     label_file=label_file,
+    #     num_patch=1,
+    #     patch_size=(105, 105)
+    # )
 
-    train_loader, val_loader, _ = create_optimized_dataloaders( # _ for test_loader as it's not used in training
-        combined_dataset,
-        batch_size=128,
-        num_workers=2,
-        patch_size=(105, 105)
-    )
+    # train_loader, val_loader, _ = create_optimized_dataloaders( # _ for test_loader as it's not used in training
+    #     combined_dataset,
+    #     batch_size=128,
+    #     num_workers=2,
+    #     patch_size=(105, 105)
+    # )
 
-    model = SCAE()
-    trained_model = train_memory_efficient_model(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        num_epochs=3, # Adjust as needed
-        learning_rate=0.0001,
-        checkpoint_dir=checkpoint_dir_path
-    )
-    print("Training finished.")
-    # Optionally save the final model
-    # torch.save(trained_model.state_dict(), f"{checkpoint_dir_path}/final_trained_model.pt")
+    # model = SCAE()
+    # trained_model = train_memory_efficient_model(
+    #     model=model,
+    #     train_loader=train_loader,
+    #     val_loader=val_loader,
+    #     num_epochs=3, # Adjust as needed
+    #     learning_rate=0.0001,
+    #     checkpoint_dir=checkpoint_dir_path
+    # )
+    # print("Training finished.")
+    # # Optionally save the final model
+    # # torch.save(trained_model.state_dict(), f"{checkpoint_dir_path}/final_trained_model.pt")
